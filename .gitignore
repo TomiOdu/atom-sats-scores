@@ -1,0 +1,25 @@
+# dbt
+target/
+dbt_packages/
+logs/
+.user.yml
+
+# Credentials. profiles.yml.example is committed; the real file never is.
+profiles.yml
+
+# Task materials, not source
+_extract/
+*.zip
+*.pdf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
