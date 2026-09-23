@@ -1,0 +1,38 @@
+version: 2
+
+seeds:
+  - name: seed_sats_conversion
+    description: >
+      2026 KS2 raw-to-scaled score conversion tables, published by the Standards
+      and Testing Agency on GOV.UK on 16/07/2026. One row per raw mark per paper.
+      A NULL scaled_score means no score is awarded at that raw mark (below 3 marks).
+      Contains public sector information licensed under the Open Government Licence v3.0.
+    columns:
+      - name: paper
+        tests:
+          - accepted_values:
+              values: ['maths', 'reading', 'gps']
+      - name: scaled_score
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 80
+              max_value: 120
+              where: "scaled_score is not null"
+
+  - name: seed_sats_paper
+    description: Per-paper metadata - mark maxima and the key thresholds.
+    columns:
+      - name: paper
+        tests: [unique, not_null]
+
+  - name: seed_subject_mapping
+    description: >
+      Maps each Atom subject to a SATs paper and a scoring method. Business
+      configuration held as data rather than as CASE statements in SQL.
+    columns:
+      - name: subject_name
+        tests: [unique, not_null]
+      - name: scoring_method
+        tests:
+          - accepted_values:
+              values: ['sats_conversion', 'not_applicable', 'excluded']

@@ -1,0 +1,149 @@
+version: 2
+
+sources:
+  - name: de_raw
+    project: atom-analytics-candidates
+    dataset: de_raw
+    description: >
+      Raw mock pupil activity data supplied with the task. Read-only.
+      Pupils sit assessments made up of questions; every question belongs to a
+      subject through a hierarchy of topics and subtopics. Known quality issues
+      are documented in README section 5 and decided in docs/DECISIONS.md.
+    freshness:
+      warn_after: {count: 2, period: day}
+      error_after: {count: 7, period: day}
+
+    tables:
+
+      - name: responses
+        description: >
+          One row per question a pupil answered - 63,707 rows. NOT one row per
+          answer event in practice: 2,082 (session, question) pairs are emitted
+          2-5 times. Grain after deduplication is (session_id, question_id).
+        loaded_at_field: answered_at
+        columns:
+          - name: response_id
+            description: >
+              Unique per ROW but not per answer event. Duplicate emissions each
+              carry their own response_id, so this cannot identify an answer.
+              Used only as the deterministic dedupe tie-break (D3).
+            tests: [unique, not_null]
+          - name: pupil_id
+            description: The pupil who answered. Joins to pupils.pupil_id. Never null, never conflicts with the parent sitting.
+          - name: session_id
+            description: >
+              The sitting this answer belongs to. Joins to
+              assessment_sittings.session_id, but 1,433 rows reference 56
+              sessions that do not exist there (D4).
+          - name: session_type
+            description: Constant ('MOCK_TEST'). Carries no information; dropped in staging (D9).
+          - name: question_id
+            description: The question answered. Joins to course_hierarchy.question_id. No orphans.
+          - name: is_correct
+            description: >
+              Whether the answer was correct. Where an event is duplicated, the
+              copies disagree in 965 cases - the single largest data quality
+              issue (D3).
+          - name: is_no_attempt
+            description: >
+              TRUE where the pupil did not answer. 3,279 rows, all with
+              is_correct = FALSE (zero contradictions). Counted as incorrect for
+              scoring, as a blank answer scores zero on a real paper (D11).
+          - name: seconds_taken
+            description: >
+              Time on the question. 3,156 rows are zero and 25 are null; 73% of
+              those are no-attempts and the remainder score at the normal rate,
+              so this is a timer that failed to record rather than anything
+              suspicious (D8). No negative values.
+          - name: question_number
+            description: Position within the sitting. Never exceeds the sitting's total_questions.
+          - name: answered_at
+            description: >
+              UTC timestamp, 10/11/2025 to 16/09/2026. Identical across duplicate
+              emissions, which is why the dedupe cannot tie-break on time.
+              1,608 rows fall 1 second after the sitting's finished_at - clock
+              skew, tolerated.
+
+      - name: assessment_sittings
+        description: >
+          One row per assessment a pupil sat - 2,509 rows, one row per
+          session_id. Every sitting covers exactly one subject. 79 have no
+          responses attached.
+        loaded_at_field: started_at
+        columns:
+          - name: session_id
+            description: Natural key. Referenced by responses.session_id.
+            tests: [unique, not_null]
+          - name: pupil_id
+            description: The pupil who sat it. Joins to pupils.pupil_id; no unknown pupils.
+          - name: assessment_id
+            description: >
+              Which assessment was sat. Mostly consistent in total_questions,
+              with one exception (one sitting of 28 questions where every other
+              sitting of that assessment had 40).
+          - name: session_type
+            description: Constant ('summative_assessment'). Everything in this dataset is a mock test (D9).
+          - name: style
+            description: >
+              fixed_question (the assessments), survey (Wellbeing only, D5), and
+              adaptive / non_adaptive which appear ONLY on response-less
+              September 2026 sittings (D7).
+          - name: year_group_at_sitting
+            description: >
+              Pupil's year group when they sat. Values 1-6 are real; 11, 14 and
+              15 appear on 25 response-less test sittings (D7). Used as a
+              reporting dimension only, never as an input to the score.
+          - name: total_questions
+            description: >
+              Intended length. Unreliable - disagrees with the actual response
+              count for 756 sittings, so not used as a scoring denominator (D10).
+          - name: is_complete
+            description: Whether the sitting finished. 31 responses sit in incomplete sittings and are kept.
+          - name: is_deleted
+            description: FALSE for every row today. Filter retained for production (D19).
+          - name: started_at
+            description: >
+              UTC start timestamp, 10/11/2025 to 14/09/2026. NULL on 12 sittings,
+              which also have a NULL finished_at and is_complete = FALSE. Eleven
+              have no responses; the twelfth has 25 Maths responses and is dated
+              from its first answer instead.
+          - name: finished_at
+            description: UTC end timestamp. Never before started_at.
+
+      - name: pupils
+        description: One row per pupil - 242 rows. Only 164 have any responses.
+        columns:
+          - name: pupil_id
+            description: Natural key.
+            tests: [unique, not_null]
+          - name: is_deleted
+            description: FALSE for every row today. Filter retained for production (D19).
+
+      - name: course_hierarchy
+        description: >
+          One row per question, placing it in the subject hierarchy - 10,552
+          rows. A catalogue rather than an activity log: 672 questions in two
+          topics have no responses at all.
+        columns:
+          - name: question_id
+            description: Natural key. Referenced by responses.question_id.
+            tests: [unique, not_null]
+          - name: atom_id
+            description: Finest grain of the hierarchy - the specific learning atom.
+          - name: subtopic_id
+            description: Parent of atom_id.
+          - name: topic_id
+            description: >
+              Parent of subtopic_id. English has 6 topics, Maths 7. No topic
+              NAMES are exposed, which is why English cannot be split into the
+              reading and GPS papers (D12).
+          - name: subject_id
+            description: Parent of topic_id. Six subjects.
+          - name: subject_name
+            description: >
+              SEVEN subjects, not six: English, Maths, Screeners, Wellbeing,
+              Verbal Reasoning, Non-Verbal Reasoning and Science. Science has
+              335 questions and zero responses, which is why the first profiling
+              pass missed it - it only appears if you count the catalogue rather
+              than the activity (D35). Only English and Maths map to a SATs
+              paper (D5, D6). Joins to seed_subject_mapping.subject_name.

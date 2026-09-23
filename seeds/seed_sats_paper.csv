@@ -1,0 +1,4 @@
+conversion_year,paper,paper_label,max_raw_mark,min_raw_mark_for_score,expected_standard_raw_mark,higher_standard_raw_mark
+2026,reading,English reading,50,3,25,39
+2026,gps,"English grammar, punctuation and spelling",70,3,34,55
+2026,maths,Mathematics,110,3,56,94

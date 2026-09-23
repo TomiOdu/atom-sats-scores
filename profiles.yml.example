@@ -1,0 +1,24 @@
+# Copy to ~/.dbt/profiles.yml and fill in. Never commit the real file.
+#
+# LOCATION MATTERS. atom-analytics-candidates.de_raw lives in europe-west2, and
+# BigQuery will not run a query that reads one location and writes another - not
+# even to the EU multi-region, which does not include europe-west2 for this
+# purpose. The build dataset must be in europe-west2 too.
+#
+# `project` is where models are WRITTEN. The sources are pinned to
+# atom-analytics-candidates in models/staging/_src_de_raw.yml, so they are read
+# cross-project regardless - which means you can build into your own project if
+# you have not been granted a dataset in Atom's.
+atom_sats:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('ATOM_DBT_PROJECT', 'atom-analytics-candidates') }}"
+      dataset: "{{ env_var('ATOM_DBT_DATASET') }}"
+      location: europe-west2
+      threads: 4
+      priority: interactive
+      job_execution_timeout_seconds: 300
+      job_retries: 1

@@ -1,0 +1,91 @@
+version: 2
+
+models:
+
+  - name: stg_responses
+    description: >
+      One row per answer event, deduplicated to one row per
+      (session_id, question_id) with the lowest response_id winning (D3).
+      Incremental and partitioned by answered_date; the duplicate copies share
+      an identical answered_at, which is what makes per-day deduplication safe.
+    columns:
+      - name: response_id
+        description: Surviving row's identifier. Unique after deduplication.
+        tests: [unique, not_null]
+      - name: pupil_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_pupils')
+              field: pupil_id
+      - name: question_id
+        description: >
+          Every response resolves to a question today. This test is what allows
+          cur_responses_enriched to use an inner join without risking a silent
+          loss of rows.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_course_hierarchy')
+              field: question_id
+      - name: is_correct
+        tests: [not_null]
+      - name: is_no_attempt
+        tests: [not_null]
+      - name: answered_date
+        tests: [not_null]
+      - name: number_of_source_emissions
+        description: >
+          How many copies of this event the source emitted. 1 for a clean row.
+          Kept visible so a regression upstream shows as a distribution shift
+          rather than as a quiet change in scores.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [session_id, question_id]
+
+  - name: stg_assessment_sittings
+    description: One row per sitting, with test and survey sittings flagged rather than removed.
+    columns:
+      - name: session_id
+        tests: [unique, not_null]
+      - name: pupil_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_pupils')
+              field: pupil_id
+      - name: year_group_at_sitting
+        description: >
+          1-6 are real. 11, 14 and 15 appear on 25 response-less September 2026
+          sittings and are flagged by is_test_sitting (D7). No accepted_values
+          test here: the point is to see the odd values, not to fail on them.
+      - name: is_test_sitting
+        tests: [not_null]
+      - name: started_date
+        description: >
+          NULL for the 12 sittings with no started_at - deliberately not tested
+          for not_null. Only one of those has responses, and the sitting model
+          dates it from its first answer instead.
+
+  - name: stg_pupils
+    description: One row per pupil, excluding deleted pupils. 242 rows today, none deleted.
+    columns:
+      - name: pupil_id
+        tests: [unique, not_null]
+
+  - name: stg_course_hierarchy
+    description: >
+      One row per question. A catalogue rather than an activity log - 672
+      questions in two topics have no responses at all.
+    columns:
+      - name: question_id
+        tests: [unique, not_null]
+      - name: subject_name
+        description: >
+          Must have a row in seed_subject_mapping, otherwise its pupils would
+          reach the output with score_status = 'unmapped_subject'.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('seed_subject_mapping')
+              field: subject_name

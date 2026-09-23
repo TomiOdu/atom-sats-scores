@@ -1,0 +1,63 @@
+name: atom_sats
+version: 1.0.0
+config-version: 2
+profile: atom_sats
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+analysis-paths: ["analyses"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # SATs conversion table year to apply. See docs/SCORING.md section 5, question 5.
+  conversion_year: 2026
+  # Minimum responses before a score is flagged reliable. Placeholder pending
+  # a product decision - docs/SCORING.md section 5, question 7.
+  min_responses: 20
+  # Days of history reprocessed on each incremental run, to catch late-arriving
+  # responses. Profiling found responses up to 2 days after the latest sitting.
+  lookback_days: 7
+
+  # Partitioning is on in any real environment. A BigQuery SANDBOX project (one
+  # with no billing account) forces a 60-day partition expiry that cannot be
+  # lifted, which silently deletes every partition older than that - and this
+  # dataset spans ten months, so ~97% of it disappears on write with no error.
+  # Set false to build unpartitioned when validating in a sandbox. Note that
+  # this also drops the two incremental models to plain tables: BigQuery's
+  # insert_overwrite strategy requires a partition_by, so the two settings
+  # cannot be varied independently.
+  partition_models: true
+
+models:
+  atom_sats:
+    staging:
+      +materialized: view
+      +schema: staging
+    curated:
+      +materialized: table
+      +schema: curated
+    modelled:
+      +materialized: table
+      +schema: modelled
+
+seeds:
+  atom_sats:
+    +schema: reference
+    seed_sats_conversion:
+      +column_types:
+        paper: STRING
+        conversion_year: INT64
+        raw_mark: INT64
+        scaled_score: INT64
+    seed_sats_paper:
+      +column_types:
+        conversion_year: INT64
+        max_raw_mark: INT64
+        min_raw_mark_for_score: INT64
+        expected_standard_raw_mark: INT64
+        higher_standard_raw_mark: INT64

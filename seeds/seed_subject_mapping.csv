@@ -1,0 +1,8 @@
+subject_name,paper,scoring_method,rationale
+English,reading,sats_conversion,"Mapped to the KS2 reading paper. course_hierarchy exposes topic_id but no topic names, so English cannot be split into reading and GPS (D12). The two curves sit within one scaled point of each other, so the cost is about a point."
+Maths,maths,sats_conversion,"Direct equivalent of the KS2 mathematics paper (D6)."
+Screeners,,not_applicable,"A diagnostic instrument, not an attainment measure. The 15.7% no-attempt rate against ~2% elsewhere suggests a timed screener pupils are not expected to finish (D6)."
+Wellbeing,,excluded,"A survey, not an assessment. is_correct encodes a chosen option rather than an attainment outcome (D5)."
+Verbal Reasoning,,not_applicable,"11+ content with no KS2 SATs equivalent (D6)."
+Non-Verbal Reasoning,,not_applicable,"11+ content with no KS2 SATs equivalent (D6)."
+Science,,not_applicable,"KS2 science is teacher-assessed and only sampled nationally, so there is no scaled-score conversion table to map onto. 335 questions in the bank and zero responses today (D35)."

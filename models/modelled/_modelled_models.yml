@@ -1,0 +1,144 @@
+version: 2
+
+models:
+
+  - name: pupil_subject_sats_history
+    description: >
+      One row per pupil, per subject, per change in score, with half-open
+      valid_from / valid_to windows. The table intended for migration into the
+      application database. The score tracked is the term-to-date pool; every
+      column describes the state as at valid_from.
+
+      Natural key: (pupil_id, subject_id, valid_from).
+      Suggested Postgres indexes: primary key on the natural key, plus an index
+      on (pupil_id, subject_id, valid_to) for current-state lookups.
+    columns:
+      - name: pupil_id
+        tests: [not_null]
+      - name: subject_id
+        tests: [not_null]
+      - name: subject_name
+        tests: [not_null]
+      - name: valid_from
+        description: First date this score applied, inclusive.
+        tests: [not_null]
+      - name: valid_to
+        description: >
+          Date it stopped applying, exclusive. NULL on the open row. Half-open
+          so a boundary date belongs to exactly one version.
+      - name: is_current
+        tests: [not_null]
+      - name: term_label
+        description: The term the score was earned in, e.g. 'Autumn 2025/26'.
+        tests: [not_null]
+      - name: term_number_in_year
+        tests:
+          - accepted_values:
+              values: [1, 2, 3]
+              quote: false
+      - name: number_of_sittings
+        description: Sittings pooled into this score - the term to date.
+        tests: [not_null]
+      - name: number_of_responses
+        description: Deduplicated responses pooled into this score, as at valid_from.
+        tests: [not_null]
+      - name: percentage_correct
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+      - name: sats_scaled_score
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 80
+              max_value: 120
+              where: "sats_scaled_score is not null"
+      - name: score_status
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - sats_conversion
+                - below_minimum_raw_score
+                - not_applicable
+                - excluded
+                - no_conversion_available
+                - unmapped_subject
+      - name: meets_expected_standard
+        description: >
+          Scaled score of 100 or more. NULL rather than FALSE where no score
+          exists, so the table never asserts that an unscored pupil failed.
+      - name: meets_higher_standard
+        description: Scaled score of 110 or more. NULL where no score exists.
+      - name: conversion_year
+        tests: [not_null]
+      - name: year_group_source
+        tests:
+          - accepted_values:
+              values: ['sitting', 'imputed_nearest', 'unknown']
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [pupil_id, subject_id, valid_from]
+      - dbt_utils.expression_is_true:
+          expression: "valid_to is null or valid_to > valid_from"
+
+  - name: pupil_subject_sats_current
+    description: >
+      Every pupil in every subject (pupils x subjects), with the score as it
+      stands today. Same columns as the history table. Pupils with no responses
+      in a subject have a NULL score and score_status = 'no_responses'. What a
+      dashboard reads by default.
+    columns:
+      - name: sats_scaled_score
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 80
+              max_value: 120
+              where: "sats_scaled_score is not null"
+      - name: score_status
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - sats_conversion
+                - below_minimum_raw_score
+                - not_applicable
+                - excluded
+                - no_conversion_available
+                - unmapped_subject
+                - no_responses
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [pupil_id, subject_id]
+
+  - name: pupil_subject_sitting_scores
+    description: >
+      One row per sitting: what the pupil scored on that test, that day. The
+      trajectory series a progress chart plots. Carries the term-to-date score
+      alongside, so the smoothed line and the raw points need no join.
+
+      A single sitting is ~25 questions and carries roughly +/-3 scaled points
+      of sampling noise, so movement between two consecutive points is usually
+      noise. The line is meaningful; the individual points are not.
+    columns:
+      - name: session_id
+        tests: [not_null]
+      - name: sitting_date
+        tests: [not_null]
+      - name: sats_scaled_score
+        description: This sitting alone.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 80
+              max_value: 120
+              where: "sats_scaled_score is not null"
+      - name: term_sats_scaled_score
+        description: The headline score as it stood immediately after this sitting.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 80
+              max_value: 120
+              where: "term_sats_scaled_score is not null"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [pupil_id, subject_id, session_id]

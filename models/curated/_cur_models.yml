@@ -1,0 +1,133 @@
+version: 2
+
+models:
+
+  - name: cur_responses_enriched
+    description: >
+      A view: one deduplicated response with its subject, sitting details and
+      scoring method. ~61,296 rows. Subject comes from the question, not the
+      sitting.
+    columns:
+      - name: response_id
+        tests: [unique, not_null]
+      - name: subject_name
+        tests: [not_null]
+      - name: sitting_known
+        description: FALSE for the 1,433 responses whose sitting row is missing (D4).
+        tests: [not_null]
+      - name: scoring_method
+        tests:
+          - accepted_values:
+              values: ['sats_conversion', 'not_applicable', 'excluded']
+
+  - name: cur_pupil_subject_sitting
+    description: >
+      Questions attempted and correct per pupil, per subject, per sitting. The
+      event store the whole design rests on - every score is derived from these
+      counts rather than stored. ~2,486 rows today. Finer than the day grain it
+      replaced, so a daily roll-up is still derivable from it.
+    columns:
+      - name: session_id
+        tests: [not_null]
+      - name: sitting_date
+        tests: [not_null]
+      - name: number_of_responses
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 1
+      - name: number_of_correct_responses
+        tests: [not_null]
+      - name: term_number_in_year
+        description: 1 autumn, 2 spring, 3 summer. Defined in macros/academic_calendar.sql.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3]
+              quote: false
+      - name: term_name
+        tests:
+          - accepted_values:
+              values: ['autumn', 'spring', 'summer']
+      - name: academic_year
+        tests: [not_null]
+      - name: sitting_known
+        tests: [not_null]
+      - name: year_group
+        description: >
+          Nullable. Reporting only - never an input to the score. Imputed from
+          the pupil's nearest sitting where the sitting row is missing.
+      - name: year_group_source
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['sitting', 'imputed_nearest', 'unknown']
+    tests:
+      # A sitting covers one subject in practice, but the grain does not assume
+      # it - this is what guarantees the scoring window cannot double-count.
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [pupil_id, subject_id, session_id]
+      - dbt_utils.expression_is_true:
+          expression: "number_of_correct_responses <= number_of_responses"
+
+  - name: cur_pupil_subject_scored
+    description: >
+      Two scores per sitting - the sitting's own, and the term-to-date pool that
+      is the headline. The only model that knows how a score is calculated.
+      Kept at full sitting grain so anyone needing exact evidence counts on an
+      arbitrary date has somewhere to read them.
+    columns:
+      - name: percentage_correct_in_sitting
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+      - name: percentage_correct_in_term
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+      - name: sitting_sats_scaled_score
+        description: This sitting alone. Noisy by nature - see the model header.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 80
+              max_value: 120
+              where: "sitting_sats_scaled_score is not null"
+      - name: term_sats_scaled_score
+        description: The headline score. NULL wherever score_status explains its absence.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 80
+              max_value: 120
+              where: "term_sats_scaled_score is not null"
+      - name: score_status
+        description: Describes the term score, which is the one consumers read.
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - sats_conversion
+                - below_minimum_raw_score
+                - not_applicable
+                - excluded
+                - no_conversion_available
+                - unmapped_subject
+      - name: is_reliable
+        description: Whether the TERM's evidence meets the threshold, not the lifetime's.
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [pupil_id, subject_id, session_id]
+      # A score must always have a status that accounts for it, in both
+      # directions. This is the contract the output promises consumers.
+      - dbt_utils.expression_is_true:
+          expression: "(term_sats_scaled_score is not null) = (score_status = 'sats_conversion')"
+      # The term pool can never be smaller than the sitting that sits inside it.
+      - dbt_utils.expression_is_true:
+          expression: "number_of_responses_in_term >= number_of_responses_in_sitting"
+      - dbt_utils.expression_is_true:
+          expression: "number_of_correct_responses_in_term <= number_of_responses_in_term"
+      # The term pool is a subset of the lifetime total, by construction.
+      - dbt_utils.expression_is_true:
+          expression: "number_of_responses_all_time >= number_of_responses_in_term"
