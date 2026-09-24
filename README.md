@@ -3,15 +3,15 @@
 A dbt project that turns raw assessment activity in `atom-analytics-candidates.de_raw`
 into a KS2 SATs score (80–120) per pupil, per subject.
 
-**Status:** built and tested: 101 data tests pass, and two full builds produced
-byte-identical output. Materialised in a personal GCP project because no candidate
-dataset was available in Atom's (§7).
+**Status:** materialised in `atom-analytics-candidates.tomi_odumuyiwa`. All 101 data
+tests pass, and a full build followed by an incremental build produce byte-identical
+output (§8).
 
 | For | Read |
 |---|---|
 | How a score is calculated, and open questions for Atom | [docs/SCORING.md](docs/SCORING.md) |
 | Table grains, joins, the output contract | [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) |
-| Every judgement call, numbered D1–D40 | [docs/DECISIONS.md](docs/DECISIONS.md) |
+| Every judgement call, numbered D1–D41 | [docs/DECISIONS.md](docs/DECISIONS.md) |
 | Step 3: predicting GCSEs | [docs/GCSE_PREDICTION.md](docs/GCSE_PREDICTION.md) |
 | How AI was used | [docs/ai/](docs/ai/) |
 
@@ -253,15 +253,8 @@ Limitations:
 
 ## 7. Not done, and next steps
 
-**Outstanding:**
+**Known limitation:**
 
-- **Build in Atom's project.** No candidate dataset exists, and the account can't
-  create one. Switching is one environment variable, since the sources are
-  already read cross-project.
-- **Test the incremental path.** Personal projects are BigQuery sandboxes, which
-  block DML (`insert_overwrite` is a `MERGE`) and delete partitions after 60 days.
-  So the incremental models were validated as full rebuilds (`partition_models:
-  false`, D36). Incremental merges and partition pruning are untested.
 - **Conversion seed.** Rebuilt from published anchor points by
   [scripts/generate_conversion_seed.py](scripts/generate_conversion_seed.py). Exact
   at the anchors, within ~1 point between them. A full transcription is a ten-minute
@@ -283,12 +276,13 @@ Limitations:
 ```bash
 cp profiles.yml.example ~/.dbt/profiles.yml   # set ATOM_DBT_DATASET; must be europe-west2
 dbt deps
-dbt seed
-dbt build
+dbt build --vars '{single_dataset: true}'
 ```
 
-Models land in `<dataset>_staging`, `_curated`, `_modelled` and `_reference`.
-Consumers only need `_modelled`.
+By default each layer builds into its own dataset (`<dataset>_staging`, `_curated`,
+`_modelled`, `_reference`). With `single_dataset: true`, everything builds into the
+one dataset, which is how the submission is materialised in `tomi_odumuyiwa`.
+Consumers only need the modelled tables.
 
 | Var | Default | Effect |
 |---|---|---|
@@ -296,6 +290,7 @@ Consumers only need `_modelled`.
 | `min_responses` | 20 | Threshold for `is_reliable`. Flags, never filters |
 | `lookback_days` | 7 | Days reprocessed per incremental run |
 | `partition_models` | true | Set false in a BigQuery sandbox (D36) |
+| `single_dataset` | false | Build every layer into the one target dataset (D41) |
 
 **Output:**
 
@@ -307,20 +302,26 @@ Consumers only need `_modelled`.
 | `pupil_subject_sats_current` | 1,694 (242 pupils × 7 subjects; 528 with evidence) |
 | `pupil_subject_sitting_scores` | 2,486 |
 
-### Re-runnability
+### Re-runnability and the incremental path
 
-Run `dbt build` twice, then compare this checksum. It should be identical:
+Verified in `tomi_odumuyiwa`: a `--full-refresh` build, then a normal build that runs
+the two incremental models as `insert_overwrite` merges. All six tables have
+identical row counts and content checksums across the two runs:
 
 ```sql
 select
     count(*) as row_count,
     -- NUMERIC: summing 61k INT64 fingerprints overflows
     sum(cast(farm_fingerprint(to_json_string(t)) as numeric)) as content_checksum
-from `<dataset>_modelled.pupil_subject_sats_history` t;
+from `atom-analytics-candidates.tomi_odumuyiwa.pupil_subject_sats_history` t;
 ```
 
-Verified on all six tables across two builds. No table has an `inserted_at` column,
-because a run timestamp would make two runs differ by construction.
+The incremental run also confirms partition pruning. `cur_pupil_subject_sitting`
+processed 22 KiB, the last 7 days of `stg_responses`, because the date filter passes
+through the `cur_responses_enriched` view.
+
+No table has an `inserted_at` column, because a run timestamp would make two runs
+differ by construction.
 
 ### Tests
 

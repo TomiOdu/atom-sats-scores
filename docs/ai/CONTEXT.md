@@ -8,7 +8,7 @@ describes the project as it stands now. How it got here is in
 `01_planning_and_prompts.md` (design and profiling) and `04_implementation_session.md`
 (the build).
 
-Last updated: 23/09/2026, end of the second build session.
+Last updated: 24/09/2026, after the build in Atom's dataset.
 
 ---
 
@@ -41,11 +41,11 @@ BigQuery so reviewers can see the output.
 | Models | Done. 10 models, all building |
 | Tests | Done. **101 data tests**, all passing (schema tests + 8 singular in `tests/`) |
 | Seeds | Done, **but the conversion seed is interpolated — see §5** |
-| Docs | Done, and trimmed for concision. README, SCORING, DATA_DICTIONARY, DECISIONS (D1–D40), GCSE_PREDICTION |
+| Docs | Done, and trimmed for concision. README, SCORING, DATA_DICTIONARY, DECISIONS (D1–D41), GCSE_PREDICTION |
 | Step 3 (GCSE) | Done. `docs/GCSE_PREDICTION.md`, linked from the README |
-| Materialised | **In a personal project, not Atom's — see §3.** `dbt build` reports 114 nodes: 10 models, 3 seeds, 101 data tests |
-| Re-runnability | **Verified.** Two builds, byte-identical output |
-| Incremental path | **Not verified.** Sandbox forbids DML — see §3 |
+| Materialised | **Done, in `atom-analytics-candidates.tomi_odumuyiwa`.** `dbt build` reports 114 nodes: 10 models, 3 seeds, 101 data tests |
+| Re-runnability | **Verified.** Full build then incremental build, byte-identical output |
+| Incremental path | **Verified** in Atom's dataset, including partition pruning (22 KiB processed) |
 | Git | Repository initialised for submission |
 
 ---
@@ -55,45 +55,37 @@ BigQuery so reviewers can see the output.
 ### Access
 
 - **ADC is authenticated** (`gcloud auth application-default login`).
-- **`atom-analytics-candidates` is read-only to us.** We have `bigquery.jobs.create`
-  and read access on `de_raw`, but no `bigquery.datasets.create`, and **no candidate
-  dataset exists**. The recruitment team has been asked about it.
-- **Build target is a personal project**, dataset prefix `atom_sats`. dbt creates
-  `atom_sats_staging`, `_curated`, `_modelled` and `_reference`. Sources are pinned
-  to `atom-analytics-candidates` in `models/staging/_src_de_raw.yml`, so switching
-  to Atom's dataset is one environment variable.
+- **Build target is `atom-analytics-candidates.tomi_odumuyiwa`**, provisioned by
+  Atom with BigQuery Data Editor. There is no permission to create other datasets,
+  so every layer builds into this one via `single_dataset: true` (D41).
+- `de_raw` is read-only.
 
 ### Running it
 
 ```bash
-export ATOM_DBT_PROJECT="<personal-project-id>"
-export ATOM_DBT_DATASET="atom_sats"
-dbt build --full-refresh --vars '{partition_models: false}'
+export ATOM_DBT_PROJECT="atom-analytics-candidates"
+export ATOM_DBT_DATASET="tomi_odumuyiwa"
+dbt build --vars '{single_dataset: true}'
 ```
 
 `~/.dbt/profiles.yml` already exists and is gitignored. Installed: dbt-core 1.11.14,
 dbt-bigquery 1.12.1, dbt_utils 1.4.1.
 
-### Three environment traps
+### Environment notes
 
 1. **`location` must be `europe-west2`.** `de_raw` lives there, not in the `EU`
    multi-region, and BigQuery refuses a query that reads one location and writes
    another.
 
-2. **Both available personal projects are BigQuery *sandboxes*** (no billing).
-   Sandboxes **forbid DML**, and `insert_overwrite` is a MERGE — so the two
-   incremental models cannot run there at all. That is why `partition_models: false`
-   exists (D36): it drops partitioning *and* the incremental materialisation, which
-   cannot be varied independently because `insert_overwrite` requires a
-   `partition_by`.
+2. **BigQuery sandboxes** (projects without billing) forbid DML, and
+   `insert_overwrite` is a MERGE. Earlier validation in a sandbox used
+   `partition_models: false` (D36), which drops partitioning and incrementality
+   together. Atom's dataset needs neither workaround.
 
 3. **Sandboxes force a 60-day partition expiry that cannot be lifted.** The data
    spans ten months, so a *partitioned* build silently loses ~97% of rows — 61,296
    became 1,503 — and reports success. `assert_no_events_lost_in_staging` now catches
    this; see §7.
-
-Sandbox tables carry a 60-day expiry, so what is materialised now disappears around
-**21/11/2026** unless billing is enabled.
 
 ---
 
@@ -178,12 +170,8 @@ every other test still passed, because a truncated table is consistent with itse
 
 ## 8. Next actions, in order
 
-1. **Build in Atom's project once a candidate dataset is provisioned** (requested).
-   Set `ATOM_DBT_PROJECT=atom-analytics-candidates` and `ATOM_DBT_DATASET=<theirs>`,
-   drop the `--vars`, and `dbt build`.
-2. **Verify the incremental path** once there is a dataset with billing — it is the
-   only part of the design still unproven, along with partition pruning.
-3. **Replace the conversion seed anchors** with a full transcription (§5).
+1. **Replace the conversion seed anchors** with a full transcription (§5).
+2. Split English into reading and GPS if topic names become available.
 
 Discussed but not done: renaming `is_reliable` to something that says reliable *in
 what sense* (`has_sufficient_evidence`), and holding real term dates as a seed.
@@ -226,7 +214,7 @@ tests/                     8 singular tests
 docs/
   SCORING.md               method, conversion tables, limitations, 9 open questions
   DATA_DICTIONARY.md       grains, join paths, output contract
-  DECISIONS.md             D1-D40, every judgement call
+  DECISIONS.md             D1-D41, every judgement call
   GCSE_PREDICTION.md       Step 3
   ai/                      this file, plus the planning and session records
 ```

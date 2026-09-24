@@ -32,6 +32,9 @@ vars:
   # insert_overwrite strategy requires a partition_by, so the two settings
   # cannot be varied independently.
   partition_models: true
+  # Build every layer into the one target dataset instead of one dataset per
+  # layer. See macros/generate_schema_name.sql.
+  single_dataset: false
 
 models:
   atom_sats:

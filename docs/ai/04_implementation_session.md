@@ -162,5 +162,25 @@ A final review aimed at making the models as simple and efficient as possible:
 Verified against a snapshot of the previous outputs: every score, window, count
 and year group is identical. The 528 previous current rows are unchanged, and
 1,166 `no_responses` rows were added. All 101 tests pass, and two builds are
-byte-identical. The incremental path remains untested, because sandboxes block
-DML (README §7).
+byte-identical.
+
+---
+
+## The build in Atom's dataset
+
+Atom provisioned `tomi_odumuyiwa`. The first attempt was denied: the dataset
+granted `roles/editor`, a project-level role that carries no permissions on a single
+dataset. Diagnosing it from the dataset's access list and a permissions check led
+to a specific request for BigQuery Data Editor, which fixed it.
+
+With only one dataset, a `generate_schema_name` override (`single_dataset`, D41)
+builds every layer into it.
+
+This was the first environment that allows DML, so it closed the last open item:
+
+- **A full build, then an incremental build**, produced identical checksums on all six
+  tables. The incremental models ran as real `insert_overwrite` merges.
+- **Partition pruning works.** The sitting model processed 22 KiB, the last seven
+  days of `stg_responses`, through the `cur_responses_enriched` view.
+- **The checksums match the earlier sandbox builds exactly**, so the output is the
+  same in both environments.
